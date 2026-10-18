@@ -61,8 +61,13 @@ async function readJson(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
+function redirect(res, location) {
+  res.writeHead(301, { Location: location });
+  res.end();
+}
+
 async function serveFile(res, urlPath) {
-  const requested = urlPath === "/" ? "/index.html" : urlPath;
+  const requested = urlPath === "/" ? "/index.html" : extname(urlPath) ? urlPath : `${urlPath}.html`;
   const file = normalize(join(landing, requested));
   if (file !== landing && !file.startsWith(landing + sep)) {
     send(res, 404, "Not found", "text/plain; charset=utf-8");
@@ -112,7 +117,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" || req.method === "HEAD") {
-    await serveFile(res, decodeURIComponent(url.pathname));
+    const path = decodeURIComponent(url.pathname);
+    if (path.endsWith(".html") || (path.length > 1 && path.endsWith("/"))) {
+      const clean = path.replace(/\/+$/, "").replace(/\.html$/, "").replace(/\/index$/, "") || "/";
+      redirect(res, clean + url.search);
+      return;
+    }
+    await serveFile(res, path);
     return;
   }
 
