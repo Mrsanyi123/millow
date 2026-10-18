@@ -24,6 +24,13 @@ const types = {
 };
 
 const hits = new Map();
+const trustProxy = process.env.TRUST_PROXY === "1";
+
+// Behind a hosting proxy every request shares the proxy's IP; the proxy appends the real client last.
+function clientIp(req) {
+  const forwarded = trustProxy && String(req.headers["x-forwarded-for"] || "").split(",").pop().trim();
+  return forwarded || req.socket.remoteAddress || "unknown";
+}
 
 function limited(ip) {
   const now = Date.now();
@@ -54,14 +61,6 @@ async function readJson(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
-async function saveEmail(waitlist, email) {
-  try {
-    await waitlist.insertOne({ email, createdAt: new Date() });
-  } catch (error) {
-    if (error.code !== 11000) throw error;
-  }
-}
-
 async function serveFile(res, urlPath) {
   const requested = urlPath === "/" ? "/index.html" : urlPath;
   const file = normalize(join(landing, requested));
@@ -79,28 +78,35 @@ async function serveFile(res, urlPath) {
   }
 }
 
-const { waitlist } = await openWaitlist();
+const waitlist = openWaitlist();
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
 
   if (url.pathname === "/api/waitlist" && req.method === "POST") {
-    const ip = req.socket.remoteAddress || "unknown";
+    const ip = clientIp(req);
     if (limited(ip)) {
       send(res, 429, { ok: false });
       return;
     }
+    let email;
     try {
       const body = await readJson(req);
-      const email = String(body.email || "").trim().toLowerCase();
-      if (!isEmail(email)) {
-        send(res, 400, { ok: false });
-        return;
-      }
-      await saveEmail(waitlist, email);
-      send(res, 200, { ok: true });
+      email = String(body.email || "").trim().toLowerCase();
     } catch {
       send(res, 400, { ok: false });
+      return;
+    }
+    if (!isEmail(email)) {
+      send(res, 400, { ok: false });
+      return;
+    }
+    try {
+      await waitlist.add(email);
+      send(res, 200, { ok: true });
+    } catch (error) {
+      console.error(error.message);
+      send(res, 502, { ok: false });
     }
     return;
   }

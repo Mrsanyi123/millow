@@ -5,8 +5,5 @@
   "scripts": {
     "start": "node server/index.js",
     "list": "node server/list.js"
-  },
-  "dependencies": {
-    "mongodb": "^6.20.0"
   }
 }

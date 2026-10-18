@@ -105,7 +105,7 @@ h1, h2, h3, p { margin: 0; }
 .btn-light:active { transform: translateY(0) scale(.98); }
 .btn .arrow { display: inline-block; transition: transform .4s var(--ease); }
 .btn:hover .arrow { transform: translateX(3px); }
-.btn-sm { padding: 11px 18px; font-size: 14px; }
+.btn-sm { padding: 15px 24px; font-size: 14px; }
 
 /* =========================================================
    HERO

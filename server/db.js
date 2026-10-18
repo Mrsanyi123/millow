@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { MongoClient } from "mongodb";
 
 export const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -25,14 +24,49 @@ export function loadEnv() {
   }
 }
 
-export async function openWaitlist() {
+export function openWaitlist() {
   loadEnv();
-  const uri = process.env.MONGODB_URI;
-  if (!uri) throw new Error("Set MONGODB_URI in .env (see .env.example)");
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SECRET_KEY;
+  if (!url || !key) throw new Error("Set SUPABASE_URL and SUPABASE_SECRET_KEY in .env (see .env.example)");
 
-  const client = new MongoClient(uri, { serverSelectionTimeoutMS: 8000 });
-  await client.connect();
-  const waitlist = client.db(process.env.MONGODB_DB || "millow").collection("waitlist");
-  await waitlist.createIndex({ email: 1 }, { unique: true });
-  return { client, waitlist };
+  const table = process.env.SUPABASE_TABLE || "waitlist";
+  const emailColumn = process.env.SUPABASE_EMAIL_COLUMN || "email";
+  const timeColumn = process.env.SUPABASE_TIME_COLUMN || "timestamp";
+  const endpoint = `${url.replace(/\/+$/, "")}/rest/v1/${encodeURIComponent(table)}`;
+
+  // New-style sb_secret_ keys are rejected in the Authorization header; legacy JWT keys need it.
+  const headers = { apikey: key, "Content-Type": "application/json" };
+  if (key.startsWith("eyJ")) headers.Authorization = `Bearer ${key}`;
+
+  async function request(path, init) {
+    const res = await fetch(endpoint + path, { ...init, headers: { ...headers, ...init.headers } });
+    if (res.ok) return res;
+    const detail = await res.json().catch(() => ({}));
+    const error = new Error(`Supabase ${res.status}: ${detail.message || res.statusText}`);
+    error.code = detail.code;
+    throw error;
+  }
+
+  return {
+    async add(email) {
+      try {
+        await request("", {
+          method: "POST",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ [emailColumn]: email, [timeColumn]: new Date().toISOString() }),
+        });
+      } catch (error) {
+        if (error.code !== "23505") throw error;
+      }
+    },
+
+    async list() {
+      const select = encodeURIComponent(`${emailColumn},${timeColumn}`);
+      const order = encodeURIComponent(`${timeColumn}.asc`);
+      const res = await request(`?select=${select}&order=${order}`, { method: "GET" });
+      const rows = await res.json();
+      return rows.map((row) => ({ email: row[emailColumn], createdAt: row[timeColumn] }));
+    },
+  };
 }
